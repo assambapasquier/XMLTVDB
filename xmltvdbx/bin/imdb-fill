@@ -1,0 +1,145 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+
+use DBI;
+
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use TVListings::Config;
+use TVListings::DB qw/:all/;
+use TVListings::imdb qw/search_imdb/;
+
+my $quitflag = 0;
+
+$SIG{INT} = sub {
+  $quitflag = 1;
+};
+
+$| = 1;
+
+my $limithrs = 24;
+my $quiet = 0;
+my $verbose = 0;
+
+for my $arg (@ARGV) {
+  if ($arg =~ /^\d+$/) {
+    $limithrs = $arg;
+  } elsif ($arg eq '--quiet') {
+    $quiet = 1;
+    $verbose = 0;
+  } elsif ($arg eq '--verbose') {
+    $verbose = 1;
+    $quiet = 0;
+  } else {
+    warn "unrecognized arg '$arg'";
+  }
+}
+
+my $dbh = DBI->connect(XMLTVDBI);
+$dbh->do("SET search_path = @{[XMLTVSCHEMA]}");
+
+print "Computing to now + $limithrs hours\n" unless $quiet;
+
+(my $bayessql = SQL_GET_BAYES) =~ s/_LIMIT_/limit 100/;
+my $imdbsql = SQL_FIND_NO_IMDB;
+my $yearsql = <<SQL;
+  select patt_value
+  from prg_attrs
+  where prg_oid = ?
+    and patt_name = 'date'
+SQL
+
+my $bayessth = $dbh->prepare($bayessql);
+my $imdbsth = $dbh->prepare($imdbsql);
+my $yearsth = $dbh->prepare($yearsql);
+my $getimdbsth = $dbh->prepare(SQL_GET_IMDB);
+my $insimdbsth = $dbh->prepare_cached(SQL_INS_IMDB);
+
+my $nowplus = 0;
+my %failedtitles;
+my %typehits = (
+  already => 0,
+  nomatch => 0,
+  ambiguous => 0,
+  hit => 0,
+);
+
+while (!$quitflag and $nowplus < $limithrs) {
+  print ">>> now + $nowplus hours " unless $quiet;
+  
+  while (!$quitflag) {
+    locktables_small($dbh);
+    $bayessth->execute($nowplus);
+    my $data = $bayessth->fetchall_arrayref({});
+    last if $#$data < 0;
+    if ($verbose) {
+      my %int = (hide => 0, bad => 0, crap => 0, normal => 0, good => 0);
+      ++$int{$_->{bayes_class}} foreach @$data;
+      print join('', map {"\n$_: $int{$_}"} sort keys %int) if $verbose;
+    } elsif (!$quiet) {
+      print ".";
+    }
+    $dbh->commit;
+  }
+  print "\n" unless $quiet;
+  
+  locktables_small($dbh);
+  $imdbsth->execute($nowplus);
+  my $imdbinfo = $imdbsth->fetchall_arrayref({});
+  
+  for my $imdbrow (@$imdbinfo) {
+    last if $quitflag;
+    if ($failedtitles{$imdbrow->{prg_title}}) {
+      print "$imdbrow->{prg_title}: PREVFAIL\n" if $verbose;
+      next;
+    }
+    
+    $imdbrow->{progid} =~ s/\..*//;
+    
+    locktables_small($dbh);
+    print "$imdbrow->{prg_title}: " unless $quiet;
+    $getimdbsth->execute($imdbrow->{progid});
+    my $curimdb = $getimdbsth->fetchall_arrayref({});
+    if ($curimdb->[0]) {
+      print "ALREADY?\n" unless $quiet;
+      ++$typehits{already};
+      next;
+    }
+    $yearsth->execute($imdbrow->{prg_oid});
+    my $year = $yearsth->fetchall_arrayref;
+    my %args = (ddprogid => $imdbrow->{progid});
+    if ($year->[0] and $year->[0][0] =~ /^(\d{4})/) {
+      $args{year} = $1;
+    }
+    my @imdbhits = search_imdb($imdbrow->{prg_title}, %args);
+    if ($#imdbhits != 0) {
+      $failedtitles{$imdbrow->{prg_title}} = 1;
+      if ($#imdbhits < 0) {
+        print "NO MATCH\n" unless $quiet;
+        ++$typehits{nomatch};
+      } elsif ($#imdbhits > 0) {
+        print "AMBIGUOUS\n" unless $quiet;
+        ++$typehits{ambiguous};
+      }
+      next;
+    }
+    $insimdbsth->execute($imdbrow->{progid}, $imdbhits[0][0]);
+    $dbh->commit;
+    print "HIT\n" unless $quiet;
+    ++$typehits{hit};
+  }
+  
+  $nowplus += 4;
+}
+
+$dbh->commit;
+$dbh->disconnect;
+
+print "IMDB fill:\n";
+for my $th (sort keys %typehits) {
+  print "  $th $typehits{$th}\n";
+}
+
+print "\nQuit cleanly\n" unless $quiet;

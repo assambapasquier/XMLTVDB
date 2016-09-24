@@ -1,0 +1,9 @@
+tr#AMC a, tr#ANIMAL a, tr#ARTS a, tr#BET a, tr#BRAVO a, tr#CNBC a, tr#COURT a,
+		tr#CSPAN a, tr#CSPAN2 a, tr#DSC a, tr#ESPN a, tr#ESPN2 a, tr#ESPNCL a,
+		tr#ETV a, tr#FAM a, tr#FOOD a, tr#FSNE1 a, tr#GSN a, tr#HISTORY a,
+		tr#LIFE a, tr#MSNBC a, tr#MTV a, tr#SPIKETV a, tr#TLC a, tr#TVLAND a,
+		tr#VH1 a, tr#WBPX a, tr#WBZ a, tr#WCVB a, tr#WENH a, tr#WFXT a, tr#WGBH a,
+		tr#WGBX a, tr#WHDH a, tr#WLVI a, tr#WSBK a {
+	overflow: hidden;
+	white-space: nowrap;
+}

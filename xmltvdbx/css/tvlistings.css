@@ -1,0 +1,312 @@
+table.tvlinks {
+  width: 100%;
+  margin-top: 0;
+}
+div.mobile table.tvlinks0 {
+  display: none;
+}
+table.tvlinks td {
+  width: 33%;
+  vertical-align: bottom;
+}
+table.tvlinks td.right {
+  text-align: right;
+  white-space: nowrap;
+}
+table.tvtimelinks {
+  width: 100%;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+table.tvtimelinks td {
+  width: 50%;
+  vertical-align: bottom;
+  font-size: small;
+}
+table.tvlistings {
+  font-size: small;
+  border-width: 2px;
+  border-style: solid;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 0;
+  margin-bottom: 0;
+  width: 100%;
+}
+table.nowlistings {
+  margin-top: 0.5em;
+}
+table.tvlistings td, table.tvlistings th {
+  border-collapse: collapse;
+}
+table.tvlistings td {
+  vertical-align: middle;
+  border-width: 1px;
+  border-style: dotted;
+  padding: 0px 1px 0px 1px;
+}
+table.tvlistings th {
+  vertical-align: middle;
+  border-width: 2px;
+  border-top-width: 0px;
+  border-style: solid;
+  padding: 1px;
+}
+td.tv {
+  margin: 0;
+  padding: 0;
+  vertical-align: middle;
+}
+tr.hide td {
+  border-width: 0px 2px;
+  border-style: solid;
+  padding: 1px 0px 0px 0px;
+}
+table.tvlistings td.icon {
+  text-align: center;
+  vertical-align: middle;
+  padding: 0px;
+  margin: 0px;
+  border-right-width: 0px;
+}
+html body td.icon img {
+  border: 0px;
+  margin: 0px;
+  padding: 0px 1px;
+  vertical-align: middle;
+  width: 1em;
+  height: 1em;
+}
+/*
+html body tr:hover td.icon img {
+  width: 30px;
+  height: 30px;
+}
+*/
+table.tvlistings td.chan {
+  vertical-align: middle;
+  white-space: nowrap;
+  border-left-width: 0px;
+  border-right-width: 2px;
+  border-right-style: solid;
+}
+table.tvlistings td.chan a {
+  overflow: hidden;
+}
+table.tvlistings tr.chan.noicon.best_bad td.chan,
+    table.tvlistings tr.chan.noicon.best_crap td.chan {
+  font-size: 75%;
+}
+table.sres {
+  width: 100%;
+  table-layout: auto;
+}
+table.sres td, table.sres th {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+table.sres td a {
+  display: block;
+  overflow: hidden;
+}
+table.sres td.chan a, table.sres td.icon a {
+  display: inline;
+}
+table.tvlistings a {
+  color: black;
+  display: block;
+  margin: 0px;
+  padding: 0px;
+  border-width: 1px;
+}
+table.tvlistings a * {
+  color: black;
+}
+table.tvlistings a:hover {
+  text-decoration: none;
+/*
+  outline: 1px dashed black;
+  -moz-outline: 1px dashed black;
+*/
+}
+td.sciencefiction a, td.fantasy a {
+  border-width: 1px;
+  border-style: dashed;
+}
+td.interest_hide a {
+  font-size: 75%;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  /* ie needs width to apply filter */
+  width: 100%;
+  filter: alpha(opacity=0);
+}
+td.interest_bad a {
+  font-size: 75%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+td.interest_crap a {
+  font-size: 75%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+td.interest_good, td.interest_good a {
+  font-weight: bold !important;
+  font-size: inherit !important;
+}
+table.mobilelistings td.interest_normal a {
+  text-decoration: underline;
+}
+table.tvlistings td.interest_good {
+  border-width: 2px;
+  border-style: solid;
+}
+td.interest_normal, td.interest_normal a {
+  font-weight: inherit !important;
+  font-size: inherit !important;
+}
+td.long a, tr.noicon a, td.tv a {
+  overflow: hidden;
+  white-space: nowrap;
+}
+table.nowlistings td.chan {
+  font-size: 75%;
+}
+table.nowlistings tr.chan td.icon img {
+  width: 15px;
+  height: 15px;
+}
+div.showinfo sup {
+  position: relative;
+  top: 0.33em;
+  line-height: 0.33em;
+  text-align: left;
+}
+table.tvlistings td.pbar {
+  padding: 0px;
+  margin: 0px;
+  padding-top: 1px;
+  border-left-width: 0px;
+  border-right-width: 0px;
+}
+table.tvlistings td.pbar_past {
+  padding-left: 2px;
+}
+table.tvlistings td.pbar_now {
+  padding-right: 1px;
+}
+table.tvlistings td.pbar_future {
+  padding-left: 4em;
+}
+td.pbar table {
+  font-size: smaller;
+  padding: 0px;
+  border-collapse: collapse;
+  margin: 0px;
+}
+td.pbar_past table, td.pbar_future table {
+  margin-left: auto;
+}
+td.pbar_now table {
+  margin-right: auto;
+}
+table.tvlistings td.pbar td {
+  border: 1px solid black;
+  padding: 1px;
+}
+td.pbar_past td {
+  background: black;
+  color: white;
+}
+td.pbar_past td, td.pbar_future td {
+  text-align: right;
+}
+
+div.mobile table.prg_bayes {
+  display: none;
+}
+
+table.prg_bayes {
+  border-width: 2px;
+  border-style: solid;
+  border-collapse: collapse;
+  margin-left: 1em;
+  margin-bottom: 1em;
+  font-size: 80%;
+}
+
+table.prg_bayes caption {
+  font-weight: bold;
+}
+
+table.prg_bayes th {
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+  font-size: 90%;
+  font-weight: bold;
+}
+
+table.prg_bayes th, table.prg_bayes td {
+  border-right-width: 1px;
+  border-right-style: solid;
+  padding-right: 0.5em;
+  padding-left: 0.5em;
+}
+
+table.prg_bayes td {
+  font-size: 75%;
+}
+
+td.small {
+  font-size: smaller;
+}
+
+html body img.star {
+  border: 0px;
+  margin: 0px;
+  padding: 0px;
+  vertical-align: middle;
+}
+html body img.rating {
+  border: 0px;
+  margin: 0px;
+  padding: 0px 0px 0px 1em;
+  vertical-align: middle;
+}
+
+dl.showatts {
+  margin: 1em 0em;
+  font-size: smaller;
+}
+dl.showatts dt {
+  font-weight: bold;
+}
+dl.showatts dd {
+  margin-left: 2em;
+  margin-bottom: 0.5em;
+}
+dl.showatts dl dt, dl.showatts2 dt {
+  font-style: italic;
+}
+dl.showatts dd dd {
+  margin-bottom: 0.25em;
+}
+
+table.cols {
+  width: 100%;
+  margin: 0px;
+  padding: 0px;
+  border: 0px;
+}
+table.cols td.col {
+  vertical-align: top;
+  background: inherit;
+  padding-right: 1em;
+}
+table.cols td.col p {
+  margin-left: 0em !important;
+}

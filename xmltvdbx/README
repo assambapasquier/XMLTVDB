@@ -1,0 +1,191 @@
+First off, a note on AUPs and Licenses.
+
+This software is licensed under the same terms as Perl itself.
+
+However, the data that xmltv provides may have limitations on how you are
+permitted to redistribute it.  In particular, the Zap2IT source for North
+America rather clearly forbids this.  Please do not use this software to
+violate those license agreements, as it may cause them to cease offering
+their data to xmltv users for free, and this would be bad for all of us.
+
+How to install:
+
+You will need the following:
+* PostgreSQL - a version with schema support is needed, 8.3 is recommended
+* Perl - 5.8 is strongly recommended because of unicode support
+* Apache 2.x with mod_perl
+* xmltv data
+
+And the following perl modules:
+* DBI
+* DBD::Pg
+* Date::Parse
+* Time::HiRes
+* Image::Info
+
+=========================== Creating the Database ===========================
+
+First off, you'll want to create your database.  The schema.sql file contains
+the basics you'll need.  The mkschema.sh will replace the placeholder schema
+name within schema.sql with the value you pass it as an argument, and spit
+the result out to stdout.  So, you might do something like:
+
+./mkschema.sh xmltv | psql database xmltvuser
+
+And assuming the xmltvuser has create schema privileges (important!) it
+should create everything.  If you want separate users for schema ownership
+versus reading/writing data, you'll have to setup the grants yourself.  The
+pgadmin3 tool makes doing such mass grants easy.
+
+============================ Editing the Config =============================
+
+Next, you'll need to check the Config.pm for any changes you might need to
+make.  The key item is the DBI connection information.
+
+Note that the paths for the related files are as they are seen in the web
+urls, not on the local filesystem.  We'll get to mapping the web urls to the
+filesystem below.
+
+If you have authentication problems, try adding a host parameter to the
+connection string, e.g. 'dbi:Pg:dbname=xmltv' becomes
+'dbi:Pg:dbname=xmltv;host=localhost'.
+
+============================= Loading the Data ==============================
+
+Next, you'll want to load your data.  To do this, run the xmltv-pg-load
+program with the source xmltv file as an argument.  I.e.:
+
+./bin/xmltv-pg-load ~/.xmltv/na.xml
+
+Be patient.  If it's a large file it may take a few minutes to load.  This
+is something you'll probably want to schedule via cron to run after you
+download the new listings.
+
+============================ Configuring mod_perl ===========================
+
+Next, you'll need to configure mod_perl to run the tv listings code.  First,
+make sure mod_perl is installed and enabled.  Usually this can be done with
+the package management tools for your distribution.
+
+First you'll need to put the TVListings modules somewhere where mod_perl
+will find them.  On my system, /etc/apache/lib/perl (might be
+/etc/httpd/lib/perl for you) is in the default search path, so you can copy
+lib/TVListings there.  Another option is to reference the lib directory in a
+startup.pl file.  To do this, add the following directive to your httpd.conf:
+PerlRequire /path/to/xmltvdb/startup.pl
+
+Edit that startup.pl file, and put the following in it:
+use lib qw{/path/to/xmltvdb/lib};
+
+There are other ways of adding lib folders that mod_perl will see, check out
+the documentation.
+
+Once all this is done, you need to tell Apache about a location at which the
+tv listings should appear.  Something like the following should work nicely:
+
+<Location /tv>
+	SetHandler perl-script
+	PerlModule Apache::DBI
+	PerlHandler TVListings::modperl
+	Order deny,allow
+	Deny from all
+	Allow from 127.
+</Location>
+
+Other Apache options for authentication, adding local domains, etc. are left
+as an exercise for the reader.  If you want to separate read and write
+access to the system over the web, you can add a second Location directive
+to further restrict access, like so:
+
+<Location /tv/edit>
+	AuthName restricted
+	AuthType basic
+	AuthUserFile /etc/apache/users
+	AuthGroupFile /etc/apache/groups
+	Require group tvedit
+</Location>
+
+Finally, if you want to save some memory and speed, you can add TVListings
+to the startup.pl (as described above), by adding these lines to the file:
+
+use Apache ();
+use Apache::DBI ();
+use TVListings::modperl ();
+
+=================== Configuring the static web resources ===================
+
+The tv grid uses three kinds of static web resources: 2 sets of images and
+css files.
+
+The first set of images are the channel icons from xmltv.  If your xmltv
+provider doesn't give you icons, you can skip this step.  You will need to
+have the channel icons from xmltv somewhere the webserver can access them. 
+Then, add the following to your httpd.conf:
+
+Alias /images/xmltv-icons/ "/path/to/xmltv/icons/"
+
+The second set of images are those that are part of xmltvdb.  These are in
+the images folder of xmltvdb.  Add another alias for these:
+
+Alias /images/tvlistings/ "/path/to/xmltvdb/images/"
+
+Finally there are the CSS files, which provide the layout and styling of the
+grid.  These are in the css folder of xmltvdb, add another alias for these:
+
+Alias /include/tvlistings/ "/path/to/xmltvdb/css/"
+
+After doing all this, you'll need to restart/reload Apache.
+
+*** Notes for advanced users ***
+Everyone else can skip down to the next section.
+
+You can change the web paths xmltvdb expects to find these resources at by
+changing the corresponding entries in lib/TVListings/Config.pm.
+
+Also for the advanced user, if you have mod_expires enabled, you can speed
+up page loads by setting an expiration on the icons so that they're not
+reloaded so often:
+
+<Location /images/xmltv-icons/>
+  ExpiresActive on
+  ExpiresDefault M1440
+</Location>
+
+========================= Color and Layout Customization ===================
+
+The tv listings grid uses css both for layout and styling.  The
+css/tvlistings.css is all layout, and you probably shouldn't muck with it. 
+The tvcolors.css defines all the colors for the grid, and you can change
+those colors as you please.  The tvprefs.css contains a commented out
+example for how to hide channels from the display, though I recommend you do
+that by excluding them from the XMLTV data instead.  You can also put
+whatever other css styles you might want in here to customize the grid
+layout.
+
+============================ Using the Listings ============================
+
+Now that all that is setup, you want to view the tv listings!  Assuming all
+went well, you should be able to point your web browser at
+http://localhost/tv/ and get your tv grid!  If you have Mozilla or Firefox,
+you can add a sidebar for http://localhost/tv/now which will provide an
+alternate tv grid specifically designed for the sidebar.  If you enable
+internet access to the tv listings (don't do this without requiring
+authentication!), you can access a version of the now grid optimized for
+mobile phones at http://yourserver/tv/mobile.
+
+The "Interest" bit on the show details form allows you to emphasize or
+de-emphasize shows you like or dislike.  Populating the database with this
+information is probably the biggest customization you will be applying. 
+This records information for doing bayesian classification of tv shows.  The
+classification probably will not work well until you classify a bunch of
+shows.
+
+Hopefully most of the functions of the system should become self evident
+after clicking a few links.  An approximate list of features to check for:
+
+* Basic TV Grid
+* Sidebar listings for what's on now
+* Searching shows
+* Show / Movie info on IMDB
+* Listing interesting shows on now or soon
+* Basic channel information and what's coming up on it

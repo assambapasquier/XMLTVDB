@@ -1,0 +1,14 @@
+Q: Why don't I have channel icons?
+
+A: For at least the Zap2IT downloader, there's a separate program you need
+   to run in order to get the icons.  The normal downloader will only
+   reference icons that have already been downloaded, so until you download
+   the icons, none will be referenced in the xml file, and thus xmltvdb
+   won't know they exist.
+
+-----
+
+Q: It doesn't work, help!
+
+A: Please send a detailed description of your error to
+   cheetah-xmltv@fastcat.org and I'll try to help you solve the problem.

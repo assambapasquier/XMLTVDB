@@ -1,0 +1,121 @@
+diff -pru xmltvdb-3.orig/lib/TVListings/chan.pm xmltvdb-3/lib/TVListings/chan.pm
+--- xmltvdb-3.orig/lib/TVListings/chan.pm	2006-07-06 19:10:27.000000000 -0400
++++ xmltvdb-3/lib/TVListings/chan.pm	2006-12-03 22:37:45.000000000 -0500
+@@ -3,7 +3,7 @@ package TVListings::chan;
+ use strict;
+ use warnings;
+ 
+-use Apache::Constants qw/:http/;
++use Apache2::Const qw/:http/;
+ 
+ use CGI qw/escapeHTML/;
+ use Date::Parse;
+diff -pru xmltvdb-3.orig/lib/TVListings/edit.pm xmltvdb-3/lib/TVListings/edit.pm
+--- xmltvdb-3.orig/lib/TVListings/edit.pm	2006-09-20 17:04:27.000000000 -0400
++++ xmltvdb-3/lib/TVListings/edit.pm	2006-12-03 22:38:08.000000000 -0500
+@@ -3,7 +3,7 @@ package TVListings::edit;
+ use strict;
+ use warnings;
+ 
+-use Apache::Constants qw/:http/;
++use Apache2::Const qw/:http/;
+ use CGI qw/escapeHTML/;
+ use Encode;
+ 
+diff -pru xmltvdb-3.orig/lib/TVListings/grid.pm xmltvdb-3/lib/TVListings/grid.pm
+--- xmltvdb-3.orig/lib/TVListings/grid.pm	2006-02-22 18:55:23.000000000 -0500
++++ xmltvdb-3/lib/TVListings/grid.pm	2006-12-03 22:43:18.000000000 -0500
+@@ -18,7 +18,7 @@ use Date::Parse;
+ use POSIX;
+ use Time::HiRes;
+ 
+-use Apache::Constants qw/:http/;
++use Apache2::Const qw/:http/;
+ use CGI qw/escapeHTML/;
+ use CGI::Util qw/escape/;
+ use List::Util qw/min/;
+diff -pru xmltvdb-3.orig/lib/TVListings/modperl.pm xmltvdb-3/lib/TVListings/modperl.pm
+--- xmltvdb-3.orig/lib/TVListings/modperl.pm	2005-03-08 12:03:45.000000000 -0500
++++ xmltvdb-3/lib/TVListings/modperl.pm	2006-12-03 22:39:19.000000000 -0500
+@@ -7,7 +7,8 @@ package TVListings::modperl;
+ use strict;
+ use warnings;
+ 
+-use Apache::Constants qw(:response);
++use Apache2::Const;
++use APR::Table;
+ use CGI;
+ use CGI::Util qw(escape);
+ use Encode qw/from_to/;
+@@ -27,7 +28,7 @@ sub handler($$) {
+ 	my ($pkg, $r) = (@_ > 1) ? @_ : (__PACKAGE__, shift);
+ 	
+ 	# make request available to other modules
+-	Apache->request($r);
++	# Apache->request($r);
+ 	
+ 	# never cache any output, since it's all dynamic from the database
+ 	$r->no_cache(1);
+@@ -55,7 +56,7 @@ sub handler($$) {
+ 		$fixed .= '?' . $r->args if $r->args;
+ 		$r->headers_out->set(Location => $fixed);
+ 		$r->status(REDIRECT);
+-		$r->send_http_header;
++		# $r->send_http_header;
+ 		return OK;
+ 	}
+ 
+@@ -67,7 +68,7 @@ sub handler($$) {
+ 	#FIXME: this is a bad hack until proper header/retstatus handling
+ 	# can be done
+ 	if ($r->header_only) {
+-		$r->send_http_header;
++		# $r->send_http_header;
+ 		return OK;
+ 	}
+ 	
+@@ -92,7 +93,7 @@ sub handler($$) {
+ 		$r->err_headers_out->add($eho->[0], $eho->[1]);
+ 	}
+ 	$r->status($rout->{status});
+-	$r->send_http_header;
++	# $r->send_http_header;
+ 	if ($rout->{text}) {
+ 		# from utf8 octents to iso-8859-1 octets
+ 		from_to($rout->{text}, 'utf8', 'iso-8859-1');
+diff -pru xmltvdb-3.orig/lib/TVListings/now.pm xmltvdb-3/lib/TVListings/now.pm
+--- xmltvdb-3.orig/lib/TVListings/now.pm	2006-02-22 18:55:23.000000000 -0500
++++ xmltvdb-3/lib/TVListings/now.pm	2006-12-03 22:39:41.000000000 -0500
+@@ -4,7 +4,7 @@ use strict;
+ use warnings;
+ 
+ use Date::Parse;
+-use Apache::Constants qw/:http/;
++use Apache2::Const qw/:http/;
+ use POSIX;
+ use Time::HiRes;
+ 
+diff -pru xmltvdb-3.orig/lib/TVListings/search.pm xmltvdb-3/lib/TVListings/search.pm
+--- xmltvdb-3.orig/lib/TVListings/search.pm	2005-10-05 22:05:51.000000000 -0400
++++ xmltvdb-3/lib/TVListings/search.pm	2006-12-03 22:40:07.000000000 -0500
+@@ -3,7 +3,7 @@ package TVListings::search;
+ use strict;
+ use warnings;
+ 
+-use Apache::Constants qw/:http/;
++use Apache2::Const qw/:http/;
+ 
+ use CGI qw/escapeHTML/;
+ use Date::Parse;
+diff -pru xmltvdb-3.orig/lib/TVListings/show.pm xmltvdb-3/lib/TVListings/show.pm
+--- xmltvdb-3.orig/lib/TVListings/show.pm	2006-09-20 17:04:27.000000000 -0400
++++ xmltvdb-3/lib/TVListings/show.pm	2006-12-03 22:40:17.000000000 -0500
+@@ -3,7 +3,7 @@ package TVListings::show;
+ use strict;
+ use warnings;
+ 
+-use Apache::Constants qw/:http/;
++use Apache2::Const qw/:http/;
+ 
+ use POSIX;
+ use Date::Parse;

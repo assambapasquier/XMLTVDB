@@ -1,0 +1,39 @@
+table.tvlistings {
+  border-color: rgb(34,139,34);
+}
+table.tvlistings td, table.tvlistings th {
+  border-color: rgb(34,139,34);
+}
+td.tv a {
+  border-color: rgb(255,247,214);
+}
+td.movie {
+  background: rgb(229,199,78);
+}
+td.movie a {
+  border-color: rgb(229,199,78);
+}
+td.miniseries {
+  background: rgb(236,227,170);
+}
+td.miniseries a {
+  border-color: rgb(236,227,170);
+}
+td.sports, td.sportstalk, td.sportsevent, td.sportsnonevent {
+  background: rgb(125,235,125);
+}
+td.fantasy a, td.fantasy a * {
+  background: rgb(236,227,170);
+}
+td.sciencefiction a, td.sciencefiction a * {
+  background: rgb(200,200,235);
+}
+td.interest_bad a, td.interest_bad a * {
+  color: rgb(118,113,85);
+}
+td.interest_hide a, td.interest_hide a * {
+  color: rgb(255,247,214);
+}
+table.prg_bayes, table.prg_bayes th, table.prg_bayes td {
+  border-color: rgb(34,139,34);
+}

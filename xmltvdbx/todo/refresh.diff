@@ -1,0 +1,159 @@
+diff -pru xmltvdb-3.orig/lib/TVListings/Config.pm xmltvdb-3/lib/TVListings/Config.pm
+--- xmltvdb-3.orig/lib/TVListings/Config.pm	2005-09-21 23:23:34.000000000 -0400
++++ xmltvdb-3/lib/TVListings/Config.pm	2006-12-03 22:42:39.000000000 -0500
+@@ -5,7 +5,7 @@ use warnings;
+ 
+ use base qw/Exporter/;
+ our @EXPORT = qw{
+-	XMLTVDBI XMLTVSCHEMA ICONSBASE IMAGESBASE
++	XMLTVDBI XMLTVSCHEMA XMLTVREFRESH ICONSBASE IMAGESBASE
+ 	searchinsert
+ 	pagehead pagehead_mini pagefoot pagefoot_mini
+ 	pagefilter
+@@ -56,6 +56,14 @@ The name of the schema within the databa
+ 
+ use constant XMLTVSCHEMA => 'xmltv';
+ 
++=item XMLTVREFRESH
++
++Whether to refresh TV listing pages automatically.
++
++=cut
++
++use constant XMLTVREFRESH => 1;
++
+ =item ICONSBASE
+ 
+ A constant defining the URL path base that should be used for the channel
+diff -pru xmltvdb-3.orig/lib/TVListings/edit.pm xmltvdb-3/lib/TVListings/edit.pm
+--- xmltvdb-3.orig/lib/TVListings/edit.pm	2006-09-20 17:04:27.000000000 -0400
++++ xmltvdb-3/lib/TVListings/edit.pm	2006-12-03 22:38:08.000000000 -0500
+@@ -91,8 +91,10 @@ sub render {
+ 		status => HTTP_OK,
+ 		text => $out,
+ 	);
+-	$ret{hdrs} = [['Refresh', '0.1;url=' . ($q->param('returl') || './')]]
+-		unless $fail;
++	if (XMLTVREFRESH) {
++		$ret{hdrs} = [['Refresh', '0.1;url=' . ($q->param('returl') || './')]]
++			unless $fail;
++	}
+ 	return \%ret;
+ }
+ 
+diff -pru xmltvdb-3.orig/lib/TVListings/grid.pm xmltvdb-3/lib/TVListings/grid.pm
+--- xmltvdb-3.orig/lib/TVListings/grid.pm	2006-02-22 18:55:23.000000000 -0500
++++ xmltvdb-3/lib/TVListings/grid.pm	2006-12-03 22:43:18.000000000 -0500
+@@ -270,10 +270,14 @@ sub render {
+ 	$out .= "</tr>\n</table>\n" . $tvtimelinks;
+ 	
+ 	$out .= rendernote("Total", $renderstart);
+-	my $rtime = 300 - (time % 300);
+-	# don't refresh silly fast
+-	$rtime += 300 if $rtime < 15;
+-	$out .= "<!-- rtime = $rtime -->\n";
++	my @refresh;
++	if (XMLTVREFRESH) {
++		my $rtime = 300 - (time % 300);
++		# don't refresh silly fast
++		$rtime += 300 if $rtime < 15;
++		@refresh = (hdrs => [['Refresh', $rtime]]); # ;url=./
++		$out .= "<!-- rtime = $rtime -->\n";
++	}
+ 	
+ 	$out .= pagefoot($r, $q);
+ 	
+@@ -281,7 +285,7 @@ sub render {
+ 	$dbh->commit;
+ 	
+ 	return {
+-		hdrs => [['Refresh', $rtime]], # ;url=./
++		@refresh,
+ 		status => HTTP_OK,
+ 		text => $out,
+ 	};
+diff -pru xmltvdb-3.orig/lib/TVListings/now.pm xmltvdb-3/lib/TVListings/now.pm
+--- xmltvdb-3.orig/lib/TVListings/now.pm	2006-02-22 18:55:23.000000000 -0500
++++ xmltvdb-3/lib/TVListings/now.pm	2006-12-03 22:39:41.000000000 -0500
+@@ -63,16 +63,20 @@ sub render {
+   $out .= rendernote('Table', $renderstep);
+   $out .= rendernote('Total', $renderstart);
+   
+-  my $rtime = 300 - (time % 300);
+-  # don't refresh silly fast
+-  $rtime += 300 if $rtime < 15;
++  my @refresh;
++  if (XMLTVREFRESH) {
++    my $rtime = 300 - (time % 300);
++    # don't refresh silly fast
++    $rtime += 300 if $rtime < 15;
++    @refresh = (hdrs => [['Refresh', $rtime]]);
++  }
+   $out .= pagefoot_mini($r, $q);
+   
+   # make sure we save the bayes cache
+   $dbh->commit;
+   
+   return {
+-    hdrs => [['Refresh', $rtime]],
++    @refresh,
+     status => HTTP_OK,
+     text => $out,
+   };
+diff -pru xmltvdb-3.orig/lib/TVListings/search.pm xmltvdb-3/lib/TVListings/search.pm
+--- xmltvdb-3.orig/lib/TVListings/search.pm	2005-10-05 22:05:51.000000000 -0400
++++ xmltvdb-3/lib/TVListings/search.pm	2006-12-03 22:40:07.000000000 -0500
+@@ -55,10 +55,12 @@ sub render {
+ 		$srchmode = 'i';
+ 		$srch = $q->param('int');
+ 		$sql = SQL_SEARCH_PINT;
+-		my $rtime = 300 - (time % 300);
+-		# don't refresh silly fast
+-		$rtime += 300 if $rtime < 15;
+-		push @hdrs, ['Refresh', $rtime];
++		if (XMLTVREFRESH) {
++			my $rtime = 300 - (time % 300);
++			# don't refresh silly fast
++			$rtime += 300 if $rtime < 15;
++			push @hdrs, ['Refresh', $rtime];
++		}
+ 	}
+ 	
+ 	my @navcells = ('', '', '');
+diff -pru xmltvdb-3.orig/schema.sql xmltvdb-3/schema.sql
+--- xmltvdb-3.orig/schema.sql	2006-09-20 15:02:19.000000000 -0400
++++ xmltvdb-3/schema.sql	2006-12-05 22:18:10.000000000 -0500
+@@ -80,8 +80,8 @@ else @@SCHEMA@@.round_5min($1) end$_$
+ COMMENT ON FUNCTION blk_start(timestamp with time zone) IS 'Returns the ''programming block'' start for a given time - the time rounded to a five minute mark, shifted forwards to be at least now';
+ 
+ CREATE FUNCTION blk_startx(timestamp with time zone, timestamp with time zone) RETURNS timestamp with time zone
+-    AS $_$select case when $1 < @@SCHEMA@@.round_5min($2)
+-then @@SCHEMA@@.round_5min($2)
++    AS $_$select case when $1 < @@SCHEMA@@.round_30min($2)
++then @@SCHEMA@@.round_30min($2)
+ else @@SCHEMA@@.round_5min($1) end$_$
+     LANGUAGE sql STABLE;
+ 
+@@ -435,6 +437,22 @@ END;$_$
+ 
+ COMMENT ON FUNCTION roundup_5min(timestamp with time zone) IS 'Rounds a time to the next five minute mark';
+ 
++CREATE FUNCTION round_30min(timestamp with time zone) RETURNS timestamp with time zone
++    AS $_$DECLARE
++	result timestamptz;
++	fixmin int4;
++BEGIN
++	result := $1;
++	result := trunc_mins(result);
++	fixmin := extract(minute from result);
++	fixmin := fixmin % 30;
++	result := result - (fixmin || ' minutes')::interval;
++	return result;
++END;$_$
++    LANGUAGE plpgsql STABLE;
++
++COMMENT ON FUNCTION round_30min(timestamp with time zone) IS 'Rounds a time to the previous thirty minute mark';
++
+ CREATE TABLE chan_attrs (
+     catt_oid bigserial NOT NULL,
+     chan_oid bigint NOT NULL,

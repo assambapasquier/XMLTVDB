@@ -1,0 +1,20 @@
+diff -pru xmltvdb-3.orig/schema.sql xmltvdb-3/schema.sql
+--- xmltvdb-3.orig/schema.sql	2006-09-20 15:02:19.000000000 -0400
++++ xmltvdb-3/schema.sql	2006-12-05 22:18:10.000000000 -0500
+@@ -139,10 +139,12 @@ BEGIN
+ 	end if;
+ 	if crow.pint_class is null then
+ 		select into crow * from @@SCHEMA@@.compute_bayes_class(prgoid);
+-		insert into @@SCHEMA@@.bayes_cache (prg_oid, prg_title, pint_class,
+-				bayes_prob, lastupdate, num_toks)
+-			values (crow.prg_oid, crow.prg_title, crow.pint_class,
+-				crow.bayes_prob, crow.lastupdate, crow.num_toks);
++		if crow.prg_oid is not null then
++			insert into @@SCHEMA@@.bayes_cache (prg_oid, prg_title, pint_class,
++					bayes_prob, lastupdate, num_toks)
++				values (crow.prg_oid, crow.prg_title, crow.pint_class,
++					crow.bayes_prob, crow.lastupdate, crow.num_toks);
++		end if;
+ 	end if;
+ 	return crow.pint_class;
+ END;

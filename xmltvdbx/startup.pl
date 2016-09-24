@@ -1,0 +1,1 @@
+use lib qw{/path/to/xmltvdb/lib};

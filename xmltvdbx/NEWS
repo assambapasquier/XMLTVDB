@@ -1,0 +1,20 @@
+Version 4:
+
+Major improvments, especially to the bayesian classification.
+
+Version 3:
+
+Bugfixes to bayesian classification
+
+Table locking for safe quasi-concurrent updates to bayes data
+
+Version 2:
+
+Many improvements, most notably bayesian classification.
+
+Also improvments around search and show details display.
+
+
+Version 1:
+
+Initial Release

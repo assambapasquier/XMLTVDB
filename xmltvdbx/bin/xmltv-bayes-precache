@@ -1,0 +1,91 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+
+use DBI;
+use Time::HiRes qw/time sleep/;
+
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use TVListings::Config;
+use TVListings::DB qw/:all/;
+
+my $quitflag = 0;
+my $statflag = 0;
+
+$SIG{INT} = sub {
+  $quitflag = 1;
+};
+$SIG{QUIT} = sub {
+  $statflag = 1;
+};
+
+$| = 1;
+
+my $fast = 0;
+my $limithrs = 24;
+for my $arg (@ARGV) {
+  if ($arg =~ /^\d+$/) {
+    $limithrs = $arg;
+    next;
+  }
+  if ($arg =~ /^(-f|--fast)$/) {
+    $fast = 1;
+    next;
+  }
+}
+
+my $dbh = DBI->connect(XMLTVDBI);
+$dbh->do("SET search_path = @{[XMLTVSCHEMA]}");
+
+print "Computing to now + $limithrs hrs\n";
+
+my $limit = $fast ? 2 : 5;
+sub mksql($) {
+  (my $ret = SQL_GET_BAYES) =~ s/_LIMIT_/limit $_[0]/;
+  return $ret;
+}
+my $sth = $dbh->prepare(mksql($limit));
+
+my $prevpstart = '';
+while (!$quitflag) {
+  my $t = time;
+  # just doing cache work, small locks
+  locktables_small($dbh);
+  $sth->execute($limithrs);
+  my $data = $sth->fetchall_arrayref;
+  $dbh->commit;
+  $t = time - $t;
+  # stop if we ran out of data
+  last if $#$data < 0;
+  my $lastpstart;
+  for my $row (@$data) {
+    print ".";
+    $lastpstart = $row->[1];
+    if ($lastpstart ne $prevpstart) {
+      print "\nDone with $prevpstart\n" if $prevpstart;
+      $prevpstart = $lastpstart;
+    }
+  }
+  if ($statflag) {
+    print "\nWorking on $lastpstart\n";
+    $statflag = 0;
+  }
+  if ($fast) {
+    if ($t < 0.75) {
+      ++$limit;
+      $sth = $dbh->prepare(mksql($limit));
+    } elsif ($t > 1.5 and $limit > 1) {
+      --$limit;
+      $sth = $dbh->prepare(mksql($limit));
+    }
+  } else {
+    # limit to 0.1 load in slow mode
+    sleep($t * 10);
+  }
+}
+
+$dbh->disconnect;
+
+print "\nQuit cleanly\n";

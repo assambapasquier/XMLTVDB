@@ -1,0 +1,4 @@
+If you are upgrading from a previous release of xmltvdb, the recommended
+method is to use pg_dump to dump the data (and only the data) from the
+prg_interest and bayes_toks tables, drop and recreate the schema, and then
+restore the data for those two tables.

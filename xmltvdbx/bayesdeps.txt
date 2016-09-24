@@ -1,0 +1,20 @@
+compute_bayes_class_all (*)
+  p_tok_given_pint (int/tok)
+  p_pint (*)
+
+p_tok_given_pint (int/tok)
+  tok_count_by_pint (tok+int)
+  pint_count (int)
+
+p_pint (*)
+  pint_count (int)
+  tok_total (*)
+
+pint_count (int)
+  tok_count_by_pint
+
+tok_count_by_pint (tok+int)
+  bayes_toks
+
+tok_total (*)
+  bayes_toks

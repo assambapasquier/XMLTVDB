@@ -1,0 +1,223 @@
+#!/usr/bin/perl -w
+
+# nothing to customize here, move along
+
+use strict;
+use warnings;
+
+use DBI;
+use XML::Simple;
+use Carp qw/confess/;
+use Image::Info qw/image_info dim/;
+
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use TVListings::Config;
+use TVListings::DB;
+
+$| = 1;
+
+my $listingfile = shift @ARGV;
+my $quiet = @ARGV && shift @ARGV eq "--quiet";
+
+my $dbh = DBI->connect(XMLTVDBI);
+$dbh->{ShowErrorStatement} = 1;
+$dbh->do('SET search_path = xmltv');
+
+# big update, big locks
+locktables_big($dbh);
+
+print "Loading xml\n" unless $quiet;
+my $listing = XMLin($listingfile, KeyAttr => [],
+  ForceArray => [qw{
+    channel
+      display-name icon url
+    programme 
+      title sub-title desc
+      credits
+        director actor writer adapter producer presenter commentator guest
+      date category language orig-language length icon url country episode-num
+      video audio previously-shown premiere last-chance new subtitles rating
+      star-rating
+  }], ValueAttr => ['value']);
+
+my %tables = (
+  'channels' => [qw/chan_oid chan_id/],
+  'chan_attrs' => [qw/catt_oid chan_oid catt_name catt_value/],
+  'programmes' => [qw/prg_oid prg_start prg_stop chan_oid/],
+  'prg_attrs' => [qw/patt_oid prg_oid patt_name patt_subname patt_lang
+    patt_value/],
+  'chan_icons' => [qw/icn_oid icn_src icn_width icn_height chan_oid/],
+  'prg_icons' => [qw/icn_oid icn_src icn_width icn_height prg_oid/],
+  'patt_icons' => [qw/icn_oid icn_src icn_width icn_height patt_oid/],
+);
+my %sth;
+my %sti;
+for my $table (keys %tables) {
+  my ($oidcol, @cols) = @{$tables{$table}};
+  my $oidseq = "${table}_${oidcol}_seq";
+  $oidseq = 'icons_icn_oid_seq' if $table =~ /icons/;
+  my $sqli = "INSERT INTO $table (" . join(', ', @cols)
+    . ") VALUES (" . join(', ', map {'?'} @cols) . ")";
+  $sth{$table}{i} = $dbh->prepare($sqli);
+  $sth{$table}{si} = $dbh->prepare("SELECT currval('$oidseq') AS $oidcol");
+  $sti{$table} = sub {
+    confess "bad bind count" if $#_ != $#cols;
+    confess "$cols[$#cols] may not be undef" if !defined $_[$#_];
+    if ($table =~ /icons/ and $_[0] =~ m{file:///} and !$_[1] and !$_[2]) {
+      my ($file) = ($_[0] =~ m{file://(.*)});
+      @_[1,2] = dim(image_info($file));
+    }
+    my @phvals = @_;
+    eval { $sth{$table}{i}->execute(@phvals); };
+    if ($@) {
+      die "insert failed:\n$sqli\n"
+        . join(',', map {defined $_ ? $_ : '(undef)'} @phvals) . "\n$@";
+    }
+    $sth{$table}{si}->execute;
+    return $sth{$table}{si}->fetchall_arrayref({})->[0]{$oidcol};
+  };
+}
+
+print "Clearing old data\n" unless $quiet;
+$dbh->do('DELETE FROM channels');
+
+print "Loading channels\n" unless $quiet;
+my %coid;
+my $cnum = 1;
+for my $chan (@{$listing->{channel}}) {
+  my $chanoid = $sti{channels}->($chan->{id});
+  $coid{$chan->{id}} = $chanoid;
+  my %uniq;
+  my ($ciq, $cinum, $ciname) = (-1, $cnum, $cnum);
+  for my $dn (@{$chan->{'display-name'}}) {
+    next if $uniq{dn}{$dn};
+    $sti{chan_attrs}->($chanoid, 'display-name', $dn);
+    $uniq{dn}{$dn} = 1;
+    # capture channel name and number as best we can
+    if ($dn =~ /^([0-9]+) ([^ ]+)$/) {
+      ($ciq, $cinum, $ciname) = (1, $1, $2);
+    } elsif ($ciq <= 0 and length($dn) > length($ciname)) {
+      ($ciq, $ciname) = (0, $dn);
+    }
+  }
+  # load that channel name
+  $sti{chan_attrs}->($chanoid, '_number_name', "$cinum $ciname");
+  for my $icn (@{$chan->{icon}}) {
+    next if $uniq{icon}{$icn->{src}};
+    $sti{chan_icons}->(@{$icn}{qw/src width height/}, $chanoid);
+    $uniq{icon}{$icn->{src}} = 1;
+  }
+  for my $url (@{$chan->{url}}) {
+    next if $uniq{url}{$url};
+    $sti{chan_attrs}->($chanoid, 'url', $url);
+    $uniq{url}{$url} = 1;
+  }
+  ++$cnum;
+}
+
+my %prginfo = (
+  'credits' => {'subitems' => [qw/director actor writer adapter producer
+    presenter commentator guest/]},
+  'episode-num' => {'subitem' => 'system'},
+  'video' => {'atts' => [qw/present colour aspect/]},
+  'audio' => {'atts' => [qw/present stereo/]},
+  'previously-shown' => {'atts' => [qw/start channel/]},
+  'subtitles' => {'content' => 'type'},
+  'rating' => {'subitem' => 'system', 'content' => 'value', 'icon' => 1},
+  'star-rating' => {'content' => 'value', 'icon' => 1},
+);
+
+my %icode;
+%icode = (
+  icon => sub {
+    $sti{prg_icons}->(@{$_[2]}{qw/src width height/}, $_[0]);
+  },
+  subitems => sub {
+    for my $si (@{$prginfo{$_[1]}{subitems}}) {
+      next if !defined $_[2]{$si};
+      for my $sii (@{$_[2]{$si}}) {
+        $sti{prg_attrs}->($_[0], $_[1], $si, undef, $sii);
+      }
+    }
+  },
+  default => sub {
+    my $ck = $prginfo{$_[1]}{content} || 'content';
+    my $pattoid;
+    if (ref($_[2])) {
+      $pattoid = $sti{prg_attrs}->($_[0], $_[1], undef, $_[2]{lang},
+        defined $_[2]{$ck} ? $_[2]{$ck} : '');
+    } else {
+      $pattoid = $sti{prg_attrs}->($_[0], $_[1], undef, undef, $_[2]);
+    }
+    $icode{subicon}->(@_, $pattoid);
+  },
+  subitem => sub {
+    my $ck = $prginfo{$_[1]}{content} || 'content';
+    my $pattoid = $sti{prg_attrs}->($_[0], $_[1],
+      $_[2]{$prginfo{$_[1]}{subitem}}, $_[2]{lang}, $_[2]{$ck});
+    $icode{subicon}->(@_, $pattoid);
+  },
+  atts => sub {
+    my $attcount = 0;
+    for my $aatt (@{$prginfo{$_[1]}{atts}}) {
+      next if !defined $_[2]{$aatt};
+      $sti{prg_attrs}->($_[0], $_[1], $aatt, undef, $_[2]{$aatt});
+      ++$attcount;
+    }
+    # no atts? insert a nullish record
+    $sti{prg_attrs}->($_[0], $_[1], undef, undef, '') if $attcount == 0;
+  },
+  subicon => sub {
+    if ($prginfo{$_[1]}{icon} and $_[2]{icon}) {
+      for my $icn (@{$_[2]{icon}}) {
+        $sti{patt_icon}->(@{$icn}{qw/src width height/}, $_[3]);
+      }
+    }
+  },
+);
+my %aicode;
+
+print "Loading programs\n";
+my $prgn = 0;
+for my $prg (@{$listing->{programme}}) {
+  printf "Program %d/%d\r", $prgn, $#{$listing->{programme}} unless $quiet || $prgn % 100;
+  my ($start) = sprintf "%04d-%02d-%02d %02d:%02d:%02d %s%02d:%02d",
+    ($prg->{start} =~ /^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ([+-])(\d\d)(\d\d)$/);
+  my ($stop) = sprintf "%04d-%02d-%02d %02d:%02d:%02d %s%02d:%02d",
+    ($prg->{stop} =~ /^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ([+-])(\d\d)(\d\d)$/);
+  my $prgoid = $sti{programmes}->($start, $stop, $coid{$prg->{channel}});
+  for my $aname (keys %$prg) {
+    next if !ref($prg->{$aname});
+    if (!defined $aicode{$aname}) {
+      if ($aname eq 'icon') {
+        $aicode{$aname} = $icode{icon};
+      } elsif ($prginfo{$aname}{subitems}) {
+        $aicode{$aname} = $icode{subitems};
+      } elsif ($prginfo{$aname}{subitem}) {
+        $aicode{$aname} = $icode{subitem};
+      } elsif ($prginfo{$aname}{atts}) {
+        $aicode{$aname} = $icode{atts};
+      } else {
+        $aicode{$aname} = $icode{default};
+      }
+    }
+    for my $aitem (@{$prg->{$aname}}) {
+      $aicode{$aname}->($prgoid, $aname, $aitem);
+    }
+  }
+  ++$prgn;
+}
+printf "Program %d/%d (done)\n", $prgn, $#{$listing->{programme}} unless $quiet;
+
+$dbh->commit;
+#$dbh->{AutoCommit} = 1;
+# another big update, big lock
+locktables_big($dbh);
+print "Bayes and Vacuum\n" unless $quiet;
+$dbh->selectall_arrayref('SELECT update_bayes_stats()');
+# this causes a lot of errors, let autovacuum deal with it
+# $dbh->do('VACUUM ANALYZE');
+$dbh->disconnect;
+
+exit(0);
