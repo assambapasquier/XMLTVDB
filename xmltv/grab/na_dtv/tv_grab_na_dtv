@@ -1,0 +1,800 @@
+#!/usr/bin/perl -w
+
+=pod
+
+=head1 NAME
+
+tv_grab_na_dtv - Grab TV listings from DirecTV.
+
+=head1 SYNOPSIS
+
+tv_grab_na_dtv --help
+
+tv_grab_na_dtv --configure [--config-file FILE]
+
+tv_grab_na_dtv [--config-file FILE]
+                 [--days N] [--offset N] [--processes N]
+                 [--output FILE] [--quiet] [--debug]
+
+tv_grab_na_dtv --list-channels [--config-file FILE]
+                 [--output FILE] [--quiet] [--debug]
+
+=head1 DESCRIPTION
+
+Output TV and listings in XMLTV format from directv.com.
+
+First you must run B<tv_grab_na_dtv --configure> to choose which stations
+you want to receive.
+
+Then running B<tv_grab_na_dtv> with no arguments will get listings for the
+stations you chose for five days including today.
+
+=head1 OPTIONS
+
+B<--configure> Prompt for which stations to download and write the
+configuration file.
+
+B<--config-file FILE> Set the name of the configuration file, the
+default is B<~/.xmltv/tv_grab_na_dtv.conf>.  This is the file written by
+B<--configure> and read when grabbing.
+
+B<--output FILE> When grabbing, write output to FILE rather than
+standard output.
+
+B<--days N> When grabbing, grab N days rather than 5.
+
+B<--offset N> Start grabbing at today + N days.
+
+B<--processes N> Nunber of processes to run to fetch program details.
+8 is a good number to try. You could try more with plenty of CPU and
+bandwidth. More processes will reduce the time it takes to fetch your
+listings. But be warned, the benefit might not be as much as you think,
+and the more processes you initiate the more you are making it obvious
+you are scraping and more likely to get banned by the source site.
+A 'fast' website scraper is an oxymoron!
+
+B<--quiet> Only print error-messages on STDERR.
+
+B<--debug> Provide more information on progress to stderr to help in
+debugging.
+
+B<--list-channels>    Output a list of all channels that data is available
+                      for. The list is in xmltv-format.
+
+B<--capabilities> Show which capabilities the grabber supports.
+
+B<--version> Show the version of the grabber.
+
+B<--help> Print a help message and exit.
+
+=head1 ERROR HANDLING
+
+If the grabber fails to download data, it will print an error message to
+STDERR and then exit with a status code of 1 to indicate that the data is
+missing.
+
+=head1 ENVIRONMENT VARIABLES
+
+The environment variable HOME can be set to change where configuration
+files are stored. All configuration is stored in $HOME/.xmltv/. On Windows,
+it might be necessary to set HOME to a path without spaces in it.
+
+TEMP or TMP, if present, will override the directory used to contain temporary
+files.  Default is "/tmp", so under Windows one of these is required.
+
+=head1 CREDITS
+
+Grabber written Rod Roark (http://www.sunsetsystems.com/),
+Modified by Adam Lewandowski (adam@alewando.com) (January 2011, October 2014)
+ to account for DirecTV site/API changes.
+
+
+=head1 BUGS
+
+Like any screen-scraping grabber, this one will break regularly as the web site
+changes, and you should try to fetch a new one from the project's repository.
+At some point the breakage might not be fixable or it may be that nobody wants
+to fix it.  Sane people should use Schedules Direct instead.
+
+=cut
+
+use strict;
+use XMLTV::Configure::Writer;
+use XMLTV::Options qw/ParseOptions/;
+use LWP::UserAgent;
+use HTTP::Cookies;
+use DateTime;
+use JSON::PP;
+use Errno qw(EAGAIN);
+use URI;
+use URI::Escape;
+
+######################################################################
+#                              Globals                               #
+######################################################################
+
+# This is the number of concurrent processes for scraping and parsing
+# program details. 8 is a good number to try. You could try more with
+# plenty of CPU and bandwidth. More processes will reduce the time it
+# takes to fetch your listings.
+# But be warned, the benefit might not be as much as you think,
+# and the more processes you initiate the more you are making it obvious
+# you are scraping and more likely to get banned by the source site.
+# A 'fast' website scraper is an oxymoron!
+#
+# Set default to 1 so the xmltv.exe does NOT use perl fork
+my $MAX_PROCESSES = 1;
+
+my $VERBOSE = 0;
+my $DEBUG   = 0;
+
+my $TMP_FILEBASE = $ENV{TEMP} || $ENV{TMP} || '/tmp';
+$TMP_FILEBASE .= '/na_dtv_';
+
+my $queue_filename = "$TMP_FILEBASE" . "q";
+
+my $SITEBASE = "http://www.directv.com";
+
+# URL for grabbing channel list
+my $CHANNEL_LIST_URL = "$SITEBASE/json/channels";
+
+# URL for schedule data
+my $SCHEDULE_URL = "$SITEBASE/json/channelschedule";
+
+# Each program ID will be appended to this URL to get its details.
+my $DETAILS_URL = "$SITEBASE/json/program/flip";
+
+my $XML_PRELUDE =
+    '<?xml version="1.0" encoding="ISO-8859-1"?>' . "\n"
+  . '<!DOCTYPE tv SYSTEM "xmltv.dtd">' . "\n"
+  . '<tv source-info-url="http://www.directv.com/" source-info-name="DirecTV" '
+  . 'generator-info-name="XMLTV" generator-info-url="http://www.xmltv.org/">'
+  . "\n";
+
+my $XML_POSTLUDE = "</tv>\n";
+
+# Global stuff shared by the parent and child processes.
+my $browser;
+my $fhq;
+my $proc_number;
+
+# Default to EST, will read from config file later
+my $timeZone;
+
+# This hash will contain accumulated channel and program information.
+# Key is channel number, value is (a reference to) a hash of channel data
+# derived from JSON data returned by DirecTV. Useful keys include:
+# chNum, chCall, chName, chLogoUrl, chId
+my %ch = ();
+
+######################################################################
+#                      Main logic starts here                        #
+######################################################################
+
+# prepare_queue creates the "queue file" of tasks for the child
+# processes. It always writes channel XML to stdout.
+if ( &prepare_queue() ) {
+
+  # Reopen the queue file so the child processes will share its handle.
+  open $fhq, "< $queue_filename";
+  binmode $fhq;
+
+  if ( $MAX_PROCESSES == 1 ) {
+
+    # Don't create any child processes - do it ourself
+    $proc_number = 0;
+    &child_logic();
+
+  } else {
+
+  # Create the children.
+  for ( $proc_number = 0 ; $proc_number < $MAX_PROCESSES ; ++$proc_number ) {
+    my $pid = fork;
+    if ($pid) {
+
+      # We are the parent.  Keep on trucking.
+    }
+    elsif ( defined $pid ) {
+
+      # We are a child.  Do juvenile stuff and then terminate.
+      exit &child_logic();
+    }
+    else {
+
+      # We are the parent and something is wrong.  If we have at least one
+      # child process already started, then go with what we have.
+      if ( $proc_number > 0 ) {
+        $MAX_PROCESSES = $proc_number;
+        last;
+      }
+
+      # Otherwise retry if possible, or die if not.
+      if ( $! == EAGAIN ) {
+        print STDERR "Temporary fork failure, will retry.\n" if ($VERBOSE);
+        sleep 5;
+        --$proc_number;
+      }
+      else {
+        die "Fork failed: $!\n";
+      }
+    }
+  }
+
+  if ($VERBOSE) {
+    print STDERR "Started $MAX_PROCESSES processes to fetch and parse schedule and program data.\n";
+  }
+
+  # This would be a good place to implement a progress bar.  Just enter a
+  # loop that sleeps for a few seconds, gets the $fhq seek pointer value,
+  # and writes the corresponding percentage completion.
+
+  # Wait for all the children to finish.
+  while ( wait != -1 ) {
+
+    # Getting here means that a child finished.
+  }
+
+  }
+
+  print STDERR "Done.  Writing results and cleaning up.\n" if ($VERBOSE);
+
+  close $fhq;
+  unlink $queue_filename;
+
+  my @cdata = ();
+
+  # Open all data files and read the first program of each.
+  for ( my $procno = 0 ; $procno < $MAX_PROCESSES ; ++$procno ) {
+    my $fname = "$TMP_FILEBASE" . $procno;
+    my $fh;
+    open $fh, "< $fname" or die "Cannot open $fname: $!\n";
+    $cdata[$procno] = [];
+    $cdata[$procno][0] = $fh;
+    &read_queue( \@cdata, $procno );
+  }
+
+  # Merge the files and print their XML program data.
+  my $lastkey = "";
+  while (1) {
+    my $plow = 0;
+
+    # Get the next program, ordering chronologically within channel.
+    for ( my $procno = 0 ; $procno < $MAX_PROCESSES ; ++$procno ) {
+      $plow = $procno if ( $cdata[$procno][1] lt $cdata[$plow][1] );
+    }
+    last if ( $cdata[$plow][1] eq 'ZZZZ' );
+    if ( $lastkey eq $cdata[$plow][1] ) {
+
+      # There seems to be some race condition in my test setup's OS that
+      # allows two child processes to grab the same qfile entry.
+      # This is an attempt to work around it. -- Rod
+      print STDERR "Skipping duplicate: $lastkey" if ($VERBOSE);
+    }
+    else {
+      print $cdata[$plow][2];
+      $lastkey = $cdata[$plow][1];
+    }
+    &read_queue( \@cdata, $plow );
+  }
+
+  # Close and delete the temporary files.
+  for ( my $procno = 0 ; $procno < $MAX_PROCESSES ; ++$procno ) {
+    close $cdata[$procno][0];
+    unlink "$TMP_FILEBASE" . $procno;
+  }
+}
+
+print $XML_POSTLUDE;
+
+exit 0;
+
+######################################################################
+#                        General Subroutines                         #
+######################################################################
+
+sub getBrowser {
+  my ($conf) = @_;
+
+  my $ua = LWP::UserAgent->new;
+
+  # Cookies
+  my $cookies = HTTP::Cookies->new;
+  $ua->cookie_jar($cookies);
+  my $zip = $conf->{zip}[0];
+
+  $cookies->set_cookie(0, 'dtve-prospect-zip', "$zip", '/', 'www.directv.com');
+
+  # Define user agent type
+  $ua->agent('Mozilla/5.0 (Linux) XmlTv');
+
+  # Define timouts
+  $ua->timeout(240);
+
+  # Use proxy if set in http_proxy etc.
+  $ua->proxy( [ 'http', 'https' ], $conf->{proxy}->[0] )
+    if $conf->{proxy}->[0];
+
+  if ($DEBUG && $VERBOSE) {
+    $ua->add_handler("request_send",  sub { print "Request:\n"; shift->dump; return });
+    $ua->add_handler("response_done", sub { print "Response:\n"; shift->dump; return });
+  }
+
+  return $ua;
+}
+
+# For escaping characters not valid in xml.  More needed here?
+sub xmltr {
+  my $txt = shift;
+  $txt =~ s/&/&amp;/g;
+  $txt =~ s/</&lt;/g;
+  $txt =~ s/>/&gt;/g;
+  $txt =~ s/\"/&quot;/g;
+  return $txt;
+}
+
+######################################################################
+#                 Subroutines for the Parent Process                 #
+######################################################################
+
+# Read one queue entry from the file created by the specified process.
+sub read_queue {
+  my ( $cdata, $procno ) = @_;
+  $cdata->[$procno][2] = '';
+  my $line = readline $cdata->[$procno][0];
+  if ( defined $line ) {
+    $cdata->[$procno][1] = $line;
+    while (1) {
+      $line = readline $cdata->[$procno][0];
+      last unless ( defined $line );
+      $cdata->[$procno][2] .= $line;
+      last if ( $line =~ /<\/programme>/i );
+    }
+  }
+  else {
+    # At EOF set the key field to a special value that sorts last.
+    $cdata->[$procno][1] = 'ZZZZ';
+  }
+}
+
+# For sorting %ch by its (channel number) key:
+sub numerically { $a cmp $b }
+
+# This is what the main process does first.  Variables in here will
+# go nicely out of scope before the child processes are started.
+sub prepare_queue {
+
+  my ( $opt, $conf ) = ParseOptions(
+    {
+      grabber_name     => "tv_grab_na_dtv",
+      capabilities     => [qw/baseline manualconfig tkconfig apiconfig/],
+      stage_sub        => \&config_stage,
+      listchannels_sub => \&list_channels,
+      version =>
+        '$Id: tv_grab_na_dtv,v 1.23 2015/01/15 20:52:38 rmeden Exp $',
+      description => "North America using www.directv.com",
+      extra_options    => [qw/procs=i processes=i/],      # allow 'procs' as a synonym for 'processes'
+      defaults         => {'procs'=>0, 'processes'=>'0'}
+    }
+  );
+
+  # If we get here, then we are generating data normally.
+
+  # Get max( $MAX_PROCESSES, --procs, --processes )
+  $MAX_PROCESSES = ($MAX_PROCESSES, $opt->{procs})[$MAX_PROCESSES < $opt->{procs}];
+  $MAX_PROCESSES = ($MAX_PROCESSES, $opt->{processes})[$MAX_PROCESSES < $opt->{processes}];
+
+  $VERBOSE = !$opt->{quiet};
+  $DEBUG   = $opt->{debug};
+
+  $timeZone = $conf->{timezone}[0];
+  $timeZone = "America/New_York" if !$timeZone; # Default to EST
+
+  $browser = getBrowser($conf);
+
+  # Populate %ch hash
+  &scrape_channel_list( $browser, $conf->{zip}[0], $conf->{channel}, \%ch );
+
+  print $XML_PRELUDE;
+
+  # Write XML for channels, and total the number of program IDs.
+  foreach my $channel_number ( sort numerically keys %ch ) {
+    print &channel_xml( $channel_number, 0, \%ch );
+  }
+
+  # Write all of the program IDs with their channel IDs and start times
+  # to a temporary file. This file will later be read by child processes.
+  my $startDate = DateTime->now;
+  $startDate->set_time_zone($timeZone);
+  $startDate->set(hour => 0, minute => 0, second => 0);
+
+  # Add offset to start date
+  $startDate -> add(days => $opt->{offset});
+
+  open $fhq, "> $queue_filename";
+  binmode $fhq;
+  foreach my $channel_number ( sort numerically keys %ch ) {
+    my %channel_data = %{ $ch{$channel_number} };
+    my $channel_name = $channel_data{chName};
+    my $channel_id   = &rfc2838( $channel_number, $channel_name );
+
+    # Write queue entry for each channel and day
+    # Queue file contains two fields: channel_number day(Mon Oct 13 2014 16:00:00 GMT-0400)
+    for ( my $day = 0 ; $day < $opt->{days} ; $day++ ) {
+      my $queueDate = $startDate->clone();
+      $queueDate->add(days => $day);
+      # my $date = $queueDate->ymd;
+      my $date = $queueDate->strftime("%a %d %b %Y %H:%M:%S GMT%z");
+
+      # Fixed-length records make life easier.  See comments in child_logic.
+      printf $fhq "%-6s %10s\n", $channel_number, $date;
+    }
+  }
+  close $fhq;
+}
+
+# Create a channel ID.
+sub rfc2838 {
+  my ( $cnum, $cname ) = @_;
+  my $num = $cnum;
+  my $extra = "";
+  if($cnum =~ /^(\d+)(-.*)/) {
+    $num = $1;
+    $extra = $2;
+  }
+  my $id = sprintf('%04s%s.directv.com', $num, $extra );
+  return $id;
+}
+
+# This gets channels and program IDs for the one 2-hour time slot from
+# the designated URL.
+sub scrape_channel_list {
+  my ( $browser, $zip, $channels, $ch ) = @_;
+
+  print STDERR "Getting channel list\n" if ($DEBUG);
+  my $resp = $browser->get($CHANNEL_LIST_URL);
+  my $json = $resp->content();
+  my $data = decode_json $json;
+
+  # Check status code
+  if ( !$data->{success} ) {
+    print STDERR "Error getting channel list: " . $data->{errorMessage} . "\n";
+    exit 1;
+  }
+
+  # Populate %ch hash for selected channels
+  my @channels = @{ $data->{channels} };
+  for my $chanRef (@channels) {
+    my %chanData       = %{$chanRef};
+    my $channel_number = $chanData{chNum};
+    my $channel_name   = $chanData{chName};
+
+    # Handle channels with both HD and SD versions (ie: 0756-1.directv.com)
+    # Usually only seen on sports subscriptions where some games are not available in HD
+    # (ie: NBA League Pass, MLS, etc)
+    my $dual;
+    if($channel_name =~ /${channel_number}-1/ && $chanData{chHd}) {
+      $dual=1;
+    }
+
+    my $channel_id     = &rfc2838( $channel_number, $channel_name );
+    # If channels were passed, skip those not listed.
+    if ($channels) {
+      next unless grep /^$channel_id$/, @$channels;
+    }
+
+    # Add to ch hash
+    $ch->{$channel_number} = $chanRef if !$ch->{$channel_number};
+    if($dual) {
+      $ch->{$channel_number}->{dual} = 1;
+    }
+  }
+}
+
+# Invoked by ParseOptions for configuration.
+sub config_stage {
+  my ( $stage, $conf ) = @_;
+
+  die "Unknown stage $stage" if $stage ne "start";
+
+  my $result;
+  my $writer = new XMLTV::Configure::Writer(
+    OUTPUT   => \$result,
+    encoding => 'utf-8'
+  );
+  $writer->start( { grabber => 'tv_grab_na_dtv' } );
+
+  # Entering a zip code will cause local channels to be included, if
+  # available.
+  $writer->write_string(
+    {
+      id    => 'zip',
+      title => [ [ 'Zip Code', 'en' ] ],
+      description =>
+        [ [ 'Enter your zip code to include local channels.', 'en' ] ],
+    }
+  );
+
+  # Timezone is needed to adjust the UTC times provided by DirecTV to local time
+  my @timezones = DateTime::TimeZone->names_in_country("US");
+  $writer->start_selectone( {
+        id => 'timezone',
+        title => [ [ 'Time Zone', 'en' ], ],
+        description => [ [ 'The timezone that you live in.', 'en' ], ],
+  } );
+
+  foreach my $tz (@timezones) {
+        $writer->write_option( {
+             value=>$tz,
+             text=> => [ [ $tz, 'en' ], ]
+        } );
+  }
+
+  $writer->end_selectone();
+
+  $writer->end('select-channels');
+  return $result;
+}
+
+# Invoked by ParseOptions when it wants the list of all channels.
+sub list_channels {
+  my ( $conf, $opt ) = @_;
+
+  $VERBOSE = !$opt->{quiet};
+
+  my $browser = getBrowser($conf);
+  &scrape_channel_list( $browser, $conf->{zip}[0], $conf->{channel}, \%ch );
+
+  my $xml = $XML_PRELUDE;
+  foreach my $channel_number ( sort numerically keys %ch ) {
+    $xml .= &channel_xml( $channel_number, 1, \%ch );
+  }
+  $xml .= $XML_POSTLUDE;
+
+  return $xml;
+}
+
+# Create XML for the designated channel.
+sub channel_xml {
+  my ( $channel_number, $setup, $ch ) = @_;
+  my %channel_data = %{ $ch->{$channel_number} };
+
+  my $channel_name = $channel_data{chName};
+  my $channel_id   = &rfc2838( $channel_number, $channel_name );
+  my $xml          = "  <channel id=\"$channel_id\">\n";
+  if ($setup) {
+
+    # At --configure time the user will want to see channel numbers.
+    $xml .=
+        "    <display-name>$channel_number "
+      . &xmltr($channel_name)
+      . "</display-name>\n";
+  } else {
+    $xml .=
+        "    <display-name>"
+      . &xmltr($channel_name)
+      . "</display-name>\n"
+      . "    <display-name>$channel_number</display-name>\n";
+  }
+  $xml .= "  </channel>\n";
+  return $xml;
+}
+
+######################################################################
+#                Subroutines for the Child Processes                 #
+######################################################################
+
+# Top-level logic for child processes.
+sub child_logic {
+  my $fname = "$TMP_FILEBASE" . $proc_number;
+  my $fh;
+  open $fh, "> $fname" or die "Cannot create $fname: $!";
+
+  # Here we use low-level I/O to read the shared queue file, so that seek
+  # pointer sharing will work properly.  We expect the sysreads to be atomic.
+  while (1) {
+    my $line = '';
+    my $readlen = sysread $fhq, $line, 41;
+    last unless ($readlen);
+
+    print STDERR "Process $proc_number Queue entry:$line" if ($DEBUG);
+    # Queue line format (%-6s %10s)
+    if ( $line =~ /^([0-9-]+)\s+(.*)$/ ) {
+      my $channel_number = $1;
+      my $day            = $2;
+      print $fh &scrape_channel_day( $browser, $channel_number, $day );
+    }
+    else {
+      # Errors here might mean that seek pointer sharing is broken.
+      print STDERR "Process $proc_number: input syntax error: '$line'\n";
+    }
+  }
+  close $fh;
+  return 0;
+}
+
+# Parse a date from either ISO-8601 or RFC-822 format
+sub parseDate {
+  my ($input) = @_;
+  if ($input =~ /^\d{4}-/) {
+    # Format 2012-01-09T04:00:00.000+0000
+    my ($y,$m,$d,$h,$min,$s,$z) = $input =~ /(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{3}([+-]\d+))?/;
+    #print "parsed '$input' into $y, $m, $d, $h, $min, $s, $z\n";
+    my $date = DateTime->new(
+          year       => $y,
+          month      => $m,
+          day        => $d,
+          hour       => $h,
+          minute     => $min,
+          second     => $s || 0,
+          nanosecond => 0,
+          time_zone  => $z || '-0400',
+      );
+      $date->set_time_zone($timeZone);
+      return $date;
+  }
+  if ($input =~ /^\w{3} /) {
+    # Format: Sun 19 Oct 2014 00:00:00 GMT-0400
+    my ($dow, $d, $m, $y, $h, $min, $s, $z) = $input =~ /(\w{3}) (\d{2}) (\w{3}) (\d{4}) (\d{2}):(\d{2}):(\d{2}).*([+-]\d{4})/;
+    #print "parsed '$input' into " . ($y,$m, $d, $h, $min, $s, $z) . "\n";
+    my %mon2num = qw(
+        Jan 1  Feb 2  Mar 3  Apr 4  May 5  Jun 6
+        Jul 7  Aug 8  Sep 9  Oct 10 Nov 11 Dec 12
+    );
+
+    my $date = DateTime->new(
+          year       => $y,
+          month      => $mon2num{$m},
+          day        => $d,
+          hour       => $h,
+          minute     => $min,
+          second     => $s,
+          nanosecond => 0,
+          time_zone  => $z,
+      );
+      $date->set_time_zone($timeZone);
+      return $date;
+  }
+
+}
+
+sub printDate {
+  my ($dt) = @_;
+  #Format 20120109233500 -0500
+  my $str = $dt->strftime("%Y%m%d%H%M%S ") . DateTime::TimeZone->offset_as_string($dt->offset);
+  return $str;
+}
+
+# Check that the start date is on the requested day (after adjusting to the specified timezone)
+sub checkStartDate {
+ my ($day, $startDt) = @_;
+ #my $cmpDay = $startDt->ymd;
+ return $startDt->ymd eq $day->ymd;
+}
+
+# This generates XML for the designated channel on the designated day
+sub scrape_channel_day {
+  my ( $browser, $channel_number, $day ) = @_;
+
+  print STDERR "Retrieving schedule info for channel $channel_number on $day\n" if ($VERBOSE);
+
+  my $shortNum = $channel_number;
+  $shortNum =~ s/(\d+)-.*/$1/;
+
+  #Get channel schedule data for the specified day from the DirecTV JSON URL
+  my $starttime = $day;
+  my $blockduration = 24;
+  my $url = URI->new($SCHEDULE_URL);
+  #TODO: Include chIds parameter (comma-sep list of channel IDs corresponding to channel numbers)
+  $url->query_form('channels' => $shortNum, 'startTime' => $starttime, 'hours' => $blockduration);
+  my $resp = $browser->get($url);
+  my $json = $resp->content();
+
+  # Parse JSON
+  my $data = decode_json $json;
+
+  # Check status code
+  if ( $data->{errors} ) {
+    my $msg = "";
+    foreach my $err (@{$data->{errors}}) {
+      $msg .= $err->{text};
+      $msg .= "\n";
+    }
+    print STDERR
+      "Error getting schedule data for channel $channel_number on $day:\n$msg";
+
+    exit 1;
+  }
+
+  my $output    = "";
+  if( ref($data->{schedule}) eq 'ARRAY' && @{ $data->{schedule}} ) {
+    my @schedules = @{ @{ $data->{schedule}}[0]->{schedules} };
+    foreach my $prog (@schedules) {
+	    # Skip if program does not start on the target date (ie: started the previous day)
+	    my $startDate = parseDate($prog->{airTime});
+	    $prog->{startDt} = $startDate;
+	    if (!checkStartDate(parseDate($day), parseDate($prog->{airTime}) )) {
+	      print STDERR "Skipping program $prog->{programID} because it doesn't start on $day: $prog->{airTime}\n" if ($DEBUG);
+	      next;
+	    }
+
+      # Get program details
+      $output .= &scrape_program_details( $browser, $channel_number, $prog );
+    }
+  }
+  return $output;
+}
+
+sub scrape_program_details {
+  my ( $browser, $channel_number, $program_data ) = @_;
+
+  # Get what we can from the JSON structure
+  my $program_id = $program_data->{programID};
+  my $title      = $program_data->{title};
+  #my $subtitle   = $program_data->{episodeTitle};
+  my $start      = $program_data->{airTime};
+  my $length     = $program_data->{duration};
+  my $hd         = $program_data->{hd};
+
+  return "" if $program_id eq "-1";
+
+  # Append '-1' to channel number if this is an HD broadcast on a dual-numbered channel
+  # This is how the channel is entered mannualy on the receiver
+  if($ch{$channel_number}->{dual} && $hd) {
+    $channel_number .= "-1";
+  }
+
+  my $channel_id = &rfc2838($channel_number);
+
+  # Calculate stop time
+  my $startDate = $program_data->{startDt};
+  my $stopDate = $startDate->clone();
+  $stopDate->add(minutes => $length);
+
+  # Get program details page
+  my $programDetailsUrl = $DETAILS_URL . "/${program_id}";
+  print STDERR "Retrieving details for program id $program_id: $programDetailsUrl\n" if ($DEBUG);
+  my $resp = $browser->get( $programDetailsUrl );
+  if(! $resp->is_success()) {
+    print STDERR "Error getting program details for $program_id: " . $resp->status_line() . "\n";
+    return "";
+	}
+
+  # my $detailContent = $resp->content();
+  # my $parser = HTML::TokeParser->new( \$detailContent );
+  my $detail_js = decode_json $resp->content();
+  my $detail = $detail_js->{"programDetail"};
+
+  # Extract program details
+  my $subtitle    = $detail->{episodeTitle};
+  my $desc        = $detail->{description};
+  my $rating      = $detail->{rating};
+  my $releaseDate = $detail->{releaseYear};
+  my $star_rating = $detail->{starRatingNum};
+
+  # Generate program XML
+  my $xml = "";
+
+  # A "header" line is written before each program's XML for sorting
+  # when the files from the children are merged.
+  $xml .= "$channel_number $startDate\n";
+
+  my $startXMLTV = $startDate->strftime ('%Y%m%d%H%M%S %z');
+  my $stopXMLTV = $stopDate->strftime ('%Y%m%d%H%M%S %z');
+
+  # Program XML
+  $xml .= "<programme start=\"" . printDate(${startDate}) . "\" ";
+  $xml .= "stop=\"" . printDate(${stopDate}) . "\" channel=\"" . $channel_id . "\">\n";
+  $xml .= "  <title lang=\"en\">" . xmltr($title) . "</title>\n" if $title;
+  $xml .= "  <sub-title lang=\"en\">" . xmltr($subtitle) . "</sub-title>\n" if $subtitle;
+  $xml .= "  <desc lang=\"en\">" . xmltr($desc) . "</desc>\n" if $desc;
+  $xml .= "  <date>" . xmltr($releaseDate) . "</date>\n" if $releaseDate;
+  $xml .= "  <video><quality>HDTV</quality></video>\n" if $hd;
+  $xml .= "  <rating system=\"MPAA\"><value>" . xmltr($rating) . "</value></rating>\n"
+    if $rating;
+  $xml .= "  <star-rating><value>" . xmltr($star_rating) . "</value></star-rating>\n"
+    if $star_rating;
+
+  $xml .= "</programme>\n";
+
+  return $xml;
+}

@@ -1,0 +1,10 @@
+#-------------ACCESS----------------------
+IP   : 107.150.33.254
+UN : customer
+PW : 0kyh24gchtq
+
+
+1) mettre le dossier .xmltv a la racine du projet et aussi .ssh et .cache
+2) dans /var/www/html/ mettre le dossier xmltvdb ainsi que xmltv
+3) creer un dossier lib dans /etc/perl et mettre TV listing labas dedans
+4) /etc/apache2/httpd.conf

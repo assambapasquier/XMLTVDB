@@ -1,0 +1,19 @@
+ <tv>
+        <programme channel="C54amc.zap2it.com" 
+            start="20031230002000 -0500" stop="20031230022000 -0500">
+            <title>Mystic Pizza</title>
+	    <desc>Three teenage girls come of age one summer working in a
+	    pizza parlor in Mystic, Conn.</desc>
+            <date>1988</date>
+            <category>Comedy</category>
+            <rating system="VCHIP">
+                <value>14</value>
+            </rating>
+            <rating system="MPAA">
+                <value>R</value>
+            </rating>
+            <star-rating>
+                <value>2.5/4</value>
+            </star-rating>
+        </programme>
+    </tv>

@@ -1,0 +1,47 @@
+#
+# Movies list for testing
+# - file format follows imdb's format for movies.list.gz file
+#
+
+MOVIES LIST
+===========
+
+Army of Darkness (1992)					1992
+Movie1 (1990)						1990
+Movie2 (1991)						1991
+Movie3 and more (1991)					1991
+Movie4 & more (1991)					1991
+Movie5 no punctuation (1991)				1991
+Movie5's with punctuation (1992)			1992
+The Movie6 (1991)					1991
+The Movie7 (1991)					1991
+A Movie8 (1991)						1991
+Une Movie9 (1991)					1991
+Les Movie10 (1991)					1991
+Los Movie11 (1991)					1991
+Las Movie12 (1991)					1991
+L' Movie13 (1991)					1991
+Le Movie14 (1991)					1991
+La Movie15 (1991)					1991
+El Movie16 (1991)					1991
+Das Movie17 (1991)					1991
+De Movie18 (1991)					1991
+Het Movie19 (1991)					1991
+Een Movie20 (1991)					1991
+Movie21 aeiouaecnssy (1991)				1991
+Movie22 dots (1991)					1991
+"The Show1" (2002) {Episode title1 (#1.1)}		1991
+"The Show1" (2002) {Episode title2 (#1.2)}		1991
+"The Show1" (2002) {Episode title1 (#2.1)}		1991
+"The Show1" (2002) {Episode title1 (#2.2)}		1991
+"The Show1" (2002) {Episode title1 (#2.10)}		1991
+Movie100 (1915)						1915
+Movie100 (1943)						1943
+Movie100 (1953)						1953
+Movie100 (1984) (TV)					1984
+Movie100 (1989) (VG)					1989
+Movie100 (1993) (V)					1993
+Movie101 (1992)						1992
+Movie101 (1993)	(V)					1993
+"Movie101" (1988)					1988
+"Movie101" (1988) {Episode1 Part 1 (#8.1)}		1992
